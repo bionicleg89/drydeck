@@ -35,6 +35,7 @@ SECRET_KEY = env("SECRET_KEY")
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -72,6 +73,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "drydeck.wsgi.application"
+ASGI_APPLICATION = "drydeck.asgi.application"
 
 
 # Database
