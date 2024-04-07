@@ -35,7 +35,9 @@ SECRET_KEY = env("SECRET_KEY")
 # Application definition
 
 INSTALLED_APPS = [
+    "job.apps.JobConfig",
     "daphne",
+    "django.contrib.gis",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
