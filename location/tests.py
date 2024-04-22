@@ -33,16 +33,20 @@ class AddressModelTest(TestCase):
     INTERNAL_PROB = {"blank": 0.50, "internal": 0.50}
     ZIP4_PROB = {"blank": 0.50, "zip4": 0.50}
 
-    # The number of iterations to run the test methods.
-    ITERATIONS = 100
+    # The number of instances to create for each test method.
+    N_INSTANCES = 100
 
-    @classmethod
-    def setUpTestData(cls):
+    def setUp(self):
         """
-        Set up the test data for the Address model.
+        Set up the test environment before each test method is executed.
         """
-        cls.address = Address()
-        cls.duplicate_address = Address()
+        self.address_list = []
+
+        # Create N_INSTANCES of Address objects for testing.
+        for _ in range(self.N_INSTANCES):
+            address = self.create_fake_address()
+            self.address_list.append(address)
+            address.save()
 
     @classmethod
     def create_fake_address(cls):
@@ -111,291 +115,279 @@ class AddressModelTest(TestCase):
         """
         Test the string representation of the Address model.
         """
-        for _ in range(self.ITERATIONS):
-
-            self.address = self.create_fake_address()
-            self.address.full_clean()
-            self.address.save()
-
+        for address in self.address_list:
             try:
                 expected_string = " ".join(
                     [
-                        f"{value}"
+                        value
                         for value in [
-                            self.address.address_alphanumeric,
-                            self.address.predirabbrev,
-                            self.address.streetname,
-                            self.address.streettypeabbrev,
-                            self.address.postdirabbrev,
-                            self.address.internal,
-                            self.address.location,
-                            self.address.stateabbrev,
-                            self.address.zip,
-                            self.address.zip4,
+                            address.address_alphanumeric,
+                            address.predirabbrev,
+                            address.streetname,
+                            address.streettypeabbrev,
+                            address.postdirabbrev,
+                            address.internal,
+                            address.location,
+                            address.stateabbrev,
+                            address.zip,
+                            address.zip4,
                         ]
                         if value != ""
                     ]
                 )
 
-                self.assertEqual(str(self.address), expected_string)
+                self.assertEqual(address.__str__(), expected_string)
+
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
             # Now confirm it throws an error if the strings don't match.
             try:
                 self.assertNotEqual(
-                    str(self.address), " ".join([fake.word() for _ in range(10)])
+                    address.__str__(), " ".join([fake.word() for _ in range(10)])
                 )
 
-                self.assertEqual(str(self.address), expected_string)
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_creation(self):
         """
         Test the creation of an Address instance.
         """
-        for _ in range(1, self.ITERATIONS + 1):
+        for local_addr, db_addr in zip(
+            sorted(self.address_list, key=lambda x: x.id),
+            Address.objects.all().order_by("id"),
+        ):
             try:
-                self.address = self.create_fake_address()
-                self.address.full_clean()
-                self.address.save()
-
-                self.assertEqual(Address.objects.count(), _)
+                for field_name in Address.address_fields:
+                    self.assertEqual(
+                        getattr(local_addr, field_name),
+                        getattr(db_addr, field_name),
+                    )
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
-                raise e
-
-            try:
-                address_from_db = Address.objects.get(pk=self.address.pk)
-                self.assertEqual(self.address, address_from_db)
-            except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_required_fields(self):
         """
         Test that all required fields are indeed required.
         """
-        for _ in range(self.ITERATIONS):
+
+        for address in self.address_list:
             try:
-                self.address = self.create_fake_address()
-                required_fields = Address.required_fields
-                for field in required_fields:
-                    setattr(self.address, field.name, None)
+                for field in Address.required_fields:
+                    setattr(address, field.name, None)
+
                     with self.assertRaises(ValidationError):
-                        self.address.full_clean()
+                        address.full_clean()
+                        address.save()
+
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_unique_constraint(self):
         """
         Test that the unique constraint is enforced.
         """
-        for _ in range(self.ITERATIONS):
+        for address in self.address_list:
             try:
-                self.address = self.create_fake_address()
-                self.address.full_clean()
-                self.address.save()
+                address.full_clean()
+                address.save()
 
                 # Set pk to None and _state.adding to True to simulate a new instance.
-                self.address.pk = None
-                self.address._state.adding = True
+                address.pk = None
+                address._state.adding = True
 
+                # Try to save the same address again.
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
+                    address.save()
 
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
-    def test_alnum_address_field(self):
+            # Check that the constraint does not apply to a slightly different address.
+            try:
+                address.address_alphanumeric = fake.building_number()
+
+                # Check it does not raise a validation error.
+                address.full_clean()
+                address.save()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+    def test_alphanumeric_address_field_validation(self):
         """
         Test the alphanumeric address field validation.
         """
-        for _ in range(self.ITERATIONS):
-            self.address = self.create_fake_address()
-
+        for address in self.address_list:
+            # Test a malformed address_alphanumeric field.
             try:
-                self.address.address_alphanumeric = fake.password(length=10)
+                address.address_alphanumeric = fake.password(length=10)
+
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
+                    address.save()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
-
+            # Test a too long address_alphanumeric field.
             try:
-                self.address.address_alphanumeric = "".join(
-                    [
-                        self.address.address_alphanumeric,
-                        fake.building_number(),
-                    ]
-                )
+                address.address_alphanumeric = "".join([fake.word() for _ in range(10)])
+
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
+                    address.save()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_predirabbrev_field(self):
         """
         Test the predirabbrev field validation.
         """
-        for _ in range(self.ITERATIONS):
-            self.address = self.create_fake_address()
-
+        for address in self.address_list:
             try:
-                self.address.predirabbrev = fake.word()
+                address.predirabbrev = fake.word()
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_streetname_field(self):
         """
         Test the streetname field validation.
         """
-        for _ in range(self.ITERATIONS):
-            self.address = self.create_fake_address()
-
+        for address in self.address_list:
             try:
-                self.address.streetname = ""
+                address.streetname = ""
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
             try:
-                self.address.streetname = fake.sentence(nb_words=10)
+                address.streetname = fake.sentence(nb_words=10)
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_streettypeabbrev_field(self):
         """
         Test the streettypeabbrev field validation.
         """
-        for _ in range(self.ITERATIONS):
-            self.address = self.create_fake_address()
-
+        for address in self.address_list:
             try:
-                self.address.streettypeabbrev = fake.sentence(nb_words=10)
+                address.streettypeabbrev = fake.sentence(nb_words=10)
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}\n{self.address.streettypeabbrev}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_postdirabbrev_field(self):
         """
         Test the postdirabbrev field validation.
         """
-        for _ in range(self.ITERATIONS):
-            self.address = self.create_fake_address()
-
+        for address in self.address_list:
             try:
-                self.address.postdirabbrev = fake.word()
+                address.postdirabbrev = fake.word()
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
-                raise e
-                with self.assertRaises(ValidationError):
-                    self.address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_internal_field(self):
         """
         Test that the internal field is validated.
         """
-        for _ in range(self.ITERATIONS):
-            # Create address.
-            self.address = self.create_fake_address()
-
-            # Test length validation.
+        for address in self.address_list:
             try:
-                self.address.internal = fake.sentence(nb_words=10)
+                address.internal = fake.sentence(nb_words=10)
 
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
 
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_location_field(self):
         """
         Test that the location field is validated.
         """
-        for _ in range(self.ITERATIONS):
-            # Create address.
-            self.address = self.create_fake_address()
-
-            # Test blank validation.
+        for address in self.address_list:
             try:
-                self.address.location = ""
+                address.location = ""
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_stateabbrev_field(self):
         """
         Test that the stateabbrev field is validated.
         """
-        for _ in range(self.ITERATIONS):
-            # Create address.
-            self.address = self.create_fake_address()
-
-            # Test regex validation.
+        for address in self.address_list:
             try:
-                self.address.stateabbrev = fake.word() + fake.word()
+                address.stateabbrev = fake.word() + fake.word()
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}\n{self.address.stateabbrev}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
     def test_address_zip_field(self):
         """
         Test that the zip field is validated.
         """
-        for _ in range(self.ITERATIONS):
-            # Create address.
-            self.address = self.create_fake_address()
-
-            # Test regex validation.
+        for address in self.address_list:
             try:
-                self.address.zip = fake.word()
+                address.zip = fake.word()
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
-    def test_address_zip4_field(self):
+    def test_zip4_field_validation(self):
         """
         Test that the zip4 field is validated.
         """
-        for _ in range(self.ITERATIONS):
-            # Create address.
-            self.address = self.create_fake_address()
-
-            # Test regex validation.
+        for address in self.address_list:
             try:
-                self.address.zip4 = fake.word()
+                address.zip4 = fake.word()
                 with self.assertRaises(ValidationError):
-                    self.address.full_clean()
+                    address.full_clean()
             except Exception as e:
-                logger.error(f"Error occurred: {e}")
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+    def test_address_deletion(self):
+        """
+        Test the deletion of an Address instance.
+        """
+
+        for local_addr, db_addr in zip(
+            sorted(self.address_list, key=lambda x: x.id),
+            Address.objects.all().order_by("id"),
+        ):
+            try:
+                db_addr.delete()
+                # Check that the address has been deleted from the database.
+                self.assertNotIn(local_addr, Address.objects.all())
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
