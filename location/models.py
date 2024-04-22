@@ -137,6 +137,24 @@ class Address(models.Model):
         """
         return ("N", "S", "E", "W", "NE", "NW", "SE", "SW")
 
+    @classproperty
+    def address_fields(cls):
+        """
+        Returns a list of address fields.
+        """
+        return [
+            "address_alphanumeric",
+            "predirabbrev",
+            "streetname",
+            "streettypeabbrev",
+            "postdirabbrev",
+            "internal",
+            "location",
+            "stateabbrev",
+            "zip",
+            "zip4",
+        ]
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
