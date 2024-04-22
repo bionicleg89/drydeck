@@ -53,6 +53,8 @@ class AddressModelTest(TestCase):
         """
         Create a fake address for testing purposes.
         """
+
+        # Define state here so we can use it in the zip code generation.
         stateabbrev = fake.state_abbr(
             include_territories=False, include_freely_associated_states=False
         )
@@ -70,6 +72,7 @@ class AddressModelTest(TestCase):
                     ]
                 )
             ),
+            # This sometimes contains its own type, so we split it to get the street name.
             streetname=fake.street_name().split()[0],
             streettypeabbrev=fake.random_element(
                 elements=OrderedDict(
@@ -136,7 +139,10 @@ class AddressModelTest(TestCase):
                     ]
                 )
 
-                self.assertEqual(address.__str__(), expected_string)
+                # Get instance from database to compare with the expected string.
+                db_address = Address.objects.get(id=address.id)
+
+                self.assertEqual(db_address.__str__(), expected_string)
 
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
@@ -144,9 +150,7 @@ class AddressModelTest(TestCase):
 
             # Now confirm it throws an error if the strings don't match.
             try:
-                self.assertNotEqual(
-                    address.__str__(), " ".join([fake.word() for _ in range(10)])
-                )
+                self.assertNotEqual(db_address.__str__(), fake.sentence())
 
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
@@ -156,6 +160,15 @@ class AddressModelTest(TestCase):
         """
         Test the creation of an Address instance.
         """
+
+        try:
+            # Make sure we have an equal number of instances.
+            self.assertEqual(len(self.address_list), Address.objects.count())
+        except Exception as e:
+            logger.error(f"Error occurred: {e}", exc_info=True)
+            raise e
+
+        # Check that the fields of the created Address instances match the fields in the database.
         for local_addr, db_addr in zip(
             sorted(self.address_list, key=lambda x: x.id),
             Address.objects.all().order_by("id"),
@@ -182,7 +195,6 @@ class AddressModelTest(TestCase):
 
                     with self.assertRaises(ValidationError):
                         address.full_clean()
-                        address.save()
 
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
@@ -194,17 +206,13 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
-                address.full_clean()
-                address.save()
-
                 # Set pk to None and _state.adding to True to simulate a new instance.
                 address.pk = None
                 address._state.adding = True
 
-                # Try to save the same address again.
+                # Try to validate the duplicate address.
                 with self.assertRaises(ValidationError):
                     address.full_clean()
-                    address.save()
 
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
@@ -212,17 +220,24 @@ class AddressModelTest(TestCase):
 
             # Check that the constraint does not apply to a slightly different address.
             try:
-                address.address_alphanumeric = fake.building_number()
+                # We need a new building number to make the address different.
+                new_building_number = None
 
-                # Check it does not raise a validation error.
+                while True:
+                    new_building_number = fake.building_number()
+                    if new_building_number != address.address_alphanumeric:
+                        break
+
+                address.address_alphanumeric = new_building_number
+
+                # Try to validate the new address.
                 address.full_clean()
-                address.save()
 
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
-    def test_alphanumeric_address_field_validation(self):
+    def test_alphanumeric_address_field(self):
         """
         Test the alphanumeric address field validation.
         """
@@ -233,17 +248,31 @@ class AddressModelTest(TestCase):
 
                 with self.assertRaises(ValidationError):
                     address.full_clean()
-                    address.save()
+
             except Exception as e:
+
                 logger.error(f"Error occurred: {e}", exc_info=True)
+
                 raise e
+
             # Test a too long address_alphanumeric field.
             try:
                 address.address_alphanumeric = "".join([fake.word() for _ in range(10)])
 
                 with self.assertRaises(ValidationError):
                     address.full_clean()
-                    address.save()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            # Test a blank address_alphanumeric field.
+            try:
+                address.address_alphanumeric = ""
+
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
@@ -254,9 +283,33 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
-                address.predirabbrev = fake.word()
+                # Too long predirabbrev field.
+                address.predirabbrev = "".join(fake.word() for _ in range(2))
+
                 with self.assertRaises(ValidationError):
                     address.full_clean()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A blank predirabbrev field.
+                address.predirabbrev = ""
+
+                address.full_clean()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A malformed predirabbrev field.
+                address.predirabbrev = "!@"
+
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
@@ -266,18 +319,32 @@ class AddressModelTest(TestCase):
         Test the streetname field validation.
         """
         for address in self.address_list:
+            # Try a blank streetname.
             try:
                 address.streetname = ""
                 with self.assertRaises(ValidationError):
                     address.full_clean()
+
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
 
+            # Try a long streetname.
             try:
                 address.streetname = fake.sentence(nb_words=10)
                 with self.assertRaises(ValidationError):
                     address.full_clean()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            # Try a malformed streetname.
+            try:
+                address.streetname = fake.password(length=10)
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
@@ -288,9 +355,28 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
-                address.streettypeabbrev = fake.sentence(nb_words=10)
+                # A malformed streettypeabbrev.
+                address.streettypeabbrev = fake.password(length=10)
                 with self.assertRaises(ValidationError):
                     address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A blank streettypeabbrev.
+                address.streettypeabbrev = ""
+                address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A too long streettypeabbrev.
+                address.streettypeabbrev = "".join(fake.sentence(nb_words=10))
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
@@ -301,9 +387,29 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
-                address.postdirabbrev = fake.word()
+                # A too long postdirabbrev.
+                address.postdirabbrev = "".join(fake.word() for _ in range(2))
                 with self.assertRaises(ValidationError):
                     address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A blank postdirabbrev.
+                address.postdirabbrev = ""
+                address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A malformed postdirabbrev.
+                address.postdirabbrev = "!@"
+
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
@@ -314,10 +420,32 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
+                # A too long internal field.
                 address.internal = fake.sentence(nb_words=10)
 
                 with self.assertRaises(ValidationError):
                     address.full_clean()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A malformed internal field.
+                address.internal = fake.password(length=10)
+
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A blank internal field.
+                address.internal = ""
+
+                address.full_clean()
 
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
@@ -329,7 +457,27 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
+                # A blank location field.
                 address.location = ""
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A malformed location field.
+                address.location = fake.password(length=10)
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A too long location field.
+                address.location = fake.sentence(nb_words=10)
                 with self.assertRaises(ValidationError):
                     address.full_clean()
             except Exception as e:
@@ -342,7 +490,27 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
-                address.stateabbrev = fake.word() + fake.word()
+                # A too long stateabbrev.
+                address.stateabbrev = "".join(fake.word() for _ in range(2))
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A blank stateabbrev.
+                address.stateabbrev = ""
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A malformed stateabbrev.
+                address.stateabbrev = fake.password(length=10)
                 with self.assertRaises(ValidationError):
                     address.full_clean()
             except Exception as e:
@@ -355,7 +523,28 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
+                # A malformed zip field.
                 address.zip = fake.word()
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A blank zip field.
+                address.zip = ""
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A too long zip field.
+                address.zip = (
+                    fake.zipcode_in_state(state_abbr=address.stateabbrev) + "1"
+                )
                 with self.assertRaises(ValidationError):
                     address.full_clean()
             except Exception as e:
@@ -368,9 +557,27 @@ class AddressModelTest(TestCase):
         """
         for address in self.address_list:
             try:
+                # A malformed zip4 field.
                 address.zip4 = fake.word()
                 with self.assertRaises(ValidationError):
                     address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A too long zip4 field.
+                address.zip4 = fake.zipcode_plus4().split("-")[1] + "1"
+                with self.assertRaises(ValidationError):
+                    address.full_clean()
+            except Exception as e:
+                logger.error(f"Error occurred: {e}", exc_info=True)
+                raise e
+
+            try:
+                # A blank zip4 field.
+                address.zip4 = ""
+                address.full_clean()
             except Exception as e:
                 logger.error(f"Error occurred: {e}", exc_info=True)
                 raise e
