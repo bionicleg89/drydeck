@@ -128,14 +128,24 @@ class Address(models.Model):
 
     @classproperty
     def required_fields(cls):
-        return (field for field in cls._meta.fields if not field.blank)
+        """
+        Returns a list of required fields for the model.
+
+        This method retrieves all the fields from the model's meta class and
+        filters out the fields that are not allowed to be blank. The resulting
+        list contains the names of all the required fields.
+
+        Returns:
+            list: A list of required field names.
+        """
+        return [field.name for field in cls._meta.fields if not field.blank]
 
     @classproperty
     def direction_abbreviations(cls):
         """
         Returns a list of available direction abbreviations.
         """
-        return ("N", "S", "E", "W", "NE", "NW", "SE", "SW")
+        return ["N", "S", "E", "W", "NE", "NW", "SE", "SW"]
 
     @classproperty
     def address_fields(cls):
