@@ -165,6 +165,20 @@ class Address(models.Model):
             "zip4",
         ]
 
+    @classproperty
+    def optional_fields(cls):
+        """
+        Returns a list of optional fields for the model.
+
+        This method retrieves all the fields from the model's meta class and
+        filters out the fields that are allowed to be blank. The resulting
+        list contains the names of all the optional fields.
+
+        Returns:
+            list: A list of optional field names.
+        """
+        return [field.name for field in cls._meta.fields[1:] if field.blank]
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
