@@ -1,4 +1,5 @@
 import logging
+import string
 from typing import OrderedDict
 
 from django.core.exceptions import ValidationError
@@ -33,20 +34,25 @@ class AddressModelTest(TestCase):
     INTERNAL_PROB = {"blank": 0.50, "internal": 0.50}
     ZIP4_PROB = {"blank": 0.50, "zip4": 0.50}
 
-    # The number of instances to create for each test method.
+    # The number of instances to create for the test suite.
     N_INSTANCES = 100
 
-    def setUp(self):
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+
+    @classmethod
+    def setUpTestData(cls):
         """
         Set up the test environment before each test method is executed.
         """
-        self.address_list = []
+        cls.address_list = Address.objects.bulk_create(
+            [cls.create_fake_address() for _ in range(cls.N_INSTANCES)]
+        )
 
-        # Create N_INSTANCES of Address objects for testing.
-        for _ in range(self.N_INSTANCES):
-            address = self.create_fake_address()
-            self.address_list.append(address)
-            address.save()
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     @classmethod
     def create_fake_address(cls):
@@ -114,74 +120,83 @@ class AddressModelTest(TestCase):
             ),
         )
 
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+
+    @classmethod
+    def generate_symbols(cls, length):
+        symbols = string.punctuation
+        return "".join(fake.random.choice(symbols) for _ in range(length))
+
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+
     def test_address_string_representation(self):
         """
         Test the string representation of the Address model.
         """
         for address in self.address_list:
-            try:
-                expected_string = " ".join(
-                    [
-                        value
-                        for value in [
-                            address.address_alphanumeric,
-                            address.predirabbrev,
-                            address.streetname,
-                            address.streettypeabbrev,
-                            address.postdirabbrev,
-                            address.internal,
-                            address.location,
-                            address.stateabbrev,
-                            address.zip,
-                            address.zip4,
-                        ]
-                        if value != ""
+
+            expected_string = " ".join(
+                [
+                    value
+                    for value in [
+                        address.address_alphanumeric,
+                        address.predirabbrev,
+                        address.streetname,
+                        address.streettypeabbrev,
+                        address.postdirabbrev,
+                        address.internal,
+                        address.location,
+                        address.stateabbrev,
+                        address.zip,
+                        address.zip4,
                     ]
-                )
+                    if value != ""
+                ]
+            )
 
-                # Get instance from database to compare with the expected string.
-                db_address = Address.objects.get(id=address.id)
+            self.assertEqual(
+                first=address.__str__(),
+                second=expected_string,
+                msg=f"Error occurred: The string representation of address with id '{address.id}' is incorrect: {address.__str__()} != {expected_string}",
+            )
 
-                self.assertEqual(db_address.__str__(), expected_string)
-
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
-
-            # Now confirm it throws an error if the strings don't match.
-            try:
-                self.assertNotEqual(db_address.__str__(), fake.sentence())
-
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_creation(self):
         """
         Test the creation of an Address instance.
         """
 
-        try:
-            # Make sure we have an equal number of instances.
-            self.assertEqual(len(self.address_list), Address.objects.count())
-        except Exception as e:
-            logger.error(f"Error occurred: {e}", exc_info=True)
-            raise e
+        # Make we have the correct number of instances in the database.
+        self.assertEqual(
+            first=self.N_INSTANCES,
+            second=Address.objects.count(),
+            msg=f"Error occurred: Expected {self.N_INSTANCES} instances.",
+        )
 
-        # Check that the fields of the created Address instances match the fields in the database.
-        for local_addr, db_addr in zip(
-            sorted(self.address_list, key=lambda x: x.id),
-            Address.objects.all().order_by("id"),
-        ):
-            try:
-                for field_name in Address.address_fields:
-                    self.assertEqual(
-                        getattr(local_addr, field_name),
-                        getattr(db_addr, field_name),
-                    )
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+        for address in self.address_list:
+
+            # Get the address from the database.
+            db_addr = Address.objects.get(id=address.id)
+
+            # Check that the fields of the local Address instance match the fields in the database.
+            for field_name in Address.address_fields:
+
+                self.assertEqual(
+                    first=getattr(address, field_name),
+                    second=getattr(db_addr, field_name),
+                    msg=f"Error occurred: {field_name} fields do not match {address} != {db_addr}.",
+                )
+
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_required_fields(self):
         """
@@ -189,412 +204,449 @@ class AddressModelTest(TestCase):
         """
 
         for address in self.address_list:
-            try:
-                for field in Address.required_fields:
-                    setattr(address, field.name, None)
+            # Check that the required fields are required.
+            for field_name in Address.required_fields:
 
-                    with self.assertRaises(ValidationError):
-                        address.full_clean()
+                # Set the required field to an empty string to simulate a missing value.
+                setattr(address, field_name, "")
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+                with self.assertRaises(
+                    expected_exception=ValidationError,
+                    msg=f"Error occurred: {field_name} field is required and should not be allowed to be blank. {address}",
+                ):
+                    address.full_clean()
+
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+
+    def test_address_optional_fields(self):
+        """
+        Test that all optional fields are indeed optional.
+        """
+
+        for address in self.address_list:
+            # Check that the optional fields are optional.
+            for field_name in Address.optional_fields:
+
+                # Set the optional field to an empty string to simulate a missing value.
+                setattr(address, field_name, "")
+
+                try:
+                    address.full_clean()
+                except ValidationError:
+                    self.fail(
+                        f"Error occurred: {field_name} field is optional and should be allowed to be blank."
+                    )
+
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_unique_constraint(self):
         """
         Test that the unique constraint is enforced.
         """
         for address in self.address_list:
-            try:
-                # Set pk to None and _state.adding to True to simulate a new instance.
-                address.pk = None
-                address._state.adding = True
+            # Set pk to None and _state.adding to True to simulate a new instance.
+            address.pk = None
+            address._state.adding = True
 
-                # Try to validate the duplicate address.
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
-
-            # Check that the constraint does not apply to a slightly different address.
-            try:
-                # We need a new building number to make the address different.
-                new_building_number = None
-
-                while True:
-                    new_building_number = fake.building_number()
-                    if new_building_number != address.address_alphanumeric:
-                        break
-
-                address.address_alphanumeric = new_building_number
-
-                # Try to validate the new address.
+            # Try to validate the duplicate address.
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: Duplicate address {address} should not be allowed.",
+            ):
                 address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_alphanumeric_address_field(self):
         """
         Test the alphanumeric address field validation.
         """
         for address in self.address_list:
-            # Test a malformed address_alphanumeric field.
-            try:
-                address.address_alphanumeric = fake.password(length=10)
 
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            # A malformed address_alphanumeric field.
+            address.address_alphanumeric = self.generate_symbols(16)
 
-            except Exception as e:
-
-                logger.error(f"Error occurred: {e}", exc_info=True)
-
-                raise e
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: address_alphanumeric {address.address_alphanumeric} is malformed and should not be allowed.",
+            ):
+                address.full_clean()
 
             # Test a too long address_alphanumeric field.
-            try:
-                address.address_alphanumeric = "".join([fake.word() for _ in range(10)])
 
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            address.address_alphanumeric = fake.pystr_format(
+                string_format="################?"
+            )
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: address_alphanumeric {address.address_alphanumeric} is too long and should not be allowed.",
+            ):
+                address.full_clean()
 
             # Test a blank address_alphanumeric field.
-            try:
-                address.address_alphanumeric = ""
 
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            address.address_alphanumeric = ""
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: A blank address_alphanumeric should not be allowed, but was.",
+            ):
+                address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_predirabbrev_field(self):
         """
         Test the predirabbrev field validation.
         """
         for address in self.address_list:
-            try:
-                # Too long predirabbrev field.
-                address.predirabbrev = "".join(fake.word() for _ in range(2))
 
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            # A too long predirabbrev field.
+            address.predirabbrev = fake.pystr(min_chars=3, max_chars=4)
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: predirabbrev {address.predirabbrev} is too long and should not be allowed.",
+            ):
+                address.full_clean()
 
             try:
                 # A blank predirabbrev field.
                 address.predirabbrev = ""
-
                 address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            except:
+                self.fail(
+                    f"Error occurred: A blank predirabbrev should be allowed, but was not."
+                )
 
-            try:
-                # A malformed predirabbrev field.
-                address.predirabbrev = "!@"
+            # A malformed predirabbrev field.
+            address.predirabbrev = self.generate_symbols(2)
 
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: predirabbrev {address.predirabbrev} is malformed and should not be allowed.",
+            ):
+                address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_streetname_field(self):
         """
         Test the streetname field validation.
         """
         for address in self.address_list:
-            # Try a blank streetname.
-            try:
-                address.streetname = ""
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            # A blank streetname.
+            address.streetname = ""
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: A blank streetname should not be allowed, but was.",
+            ):
+                address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
-
-            # Try a long streetname.
-            try:
-                address.streetname = fake.sentence(nb_words=10)
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            # A too long streetname.
+            address.streetname = fake.pystr(min_chars=33, max_chars=34)
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: streetname {address.streetname} is too long and should not be allowed.",
+            ):
+                address.full_clean()
 
             # Try a malformed streetname.
-            try:
-                address.streetname = fake.password(length=10)
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            address.streetname = self.generate_symbols(16)
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: streetname {address.streetname} is malformed and should not be allowed.",
+            ):
+                address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_streettypeabbrev_field(self):
         """
         Test the streettypeabbrev field validation.
         """
         for address in self.address_list:
-            try:
-                # A malformed streettypeabbrev.
-                address.streettypeabbrev = fake.password(length=10)
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+
+            # A malformed streettypeabbrev.
+            address.streettypeabbrev = self.generate_symbols(8)
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: streettypeabbrev {address.streettypeabbrev} is malformed and should not be allowed.",
+            ):
+                address.full_clean()
 
             try:
                 # A blank streettypeabbrev.
                 address.streettypeabbrev = ""
                 address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            except ValidationError:
+                self.fail(
+                    f"Error occurred: A blank streettypeabbrev should be allowed, but was not."
+                )
 
-            try:
-                # A too long streettypeabbrev.
-                address.streettypeabbrev = "".join(fake.sentence(nb_words=10))
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            # A too long streettypeabbrev.
+            address.streettypeabbrev = fake.pystr(min_chars=17, max_chars=18)
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: streettypeabbrev {address.streettypeabbrev} is too long and should not be allowed.",
+            ):
+                address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_postdirabbrev_field(self):
         """
         Test the postdirabbrev field validation.
         """
         for address in self.address_list:
-            try:
-                # A too long postdirabbrev.
-                address.postdirabbrev = "".join(fake.word() for _ in range(2))
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+
+            # A too long postdirabbrev.
+            address.postdirabbrev = fake.pystr(min_chars=3, max_chars=4)
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: postdirabbrev {address.postdirabbrev} is too long and should not be allowed.",
+            ):
+                address.full_clean()
+
+            # A malformed postdirabbrev.
+            address.postdirabbrev = self.generate_symbols(2)
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg="Error occurred: postdirabbrev is malformed and should not be allowed.",
+            ):
+                address.full_clean()
 
             try:
                 # A blank postdirabbrev.
                 address.postdirabbrev = ""
                 address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            except ValidationError:
+                self.fail(
+                    f"Error occurred: A blank postdirabbrev should be allowed, but was not."
+                )
 
-            try:
-                # A malformed postdirabbrev.
-                address.postdirabbrev = "!@"
-
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
-
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
     def test_address_internal_field(self):
         """
         Test that the internal field is validated.
         """
         for address in self.address_list:
-            try:
-                # A too long internal field.
-                address.internal = fake.sentence(nb_words=10)
 
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
-
-            try:
-                # A malformed internal field.
-                address.internal = fake.password(length=10)
-
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
-
-            try:
-                # A blank internal field.
-                address.internal = ""
-
+            # A too long internal field.
+            with self.assertRaises(
+                ValidationError,
+                msg=f"Error occurred: internal {address.internal} is too long and should not be allowed.",
+            ):
+                address.internal = fake.pystr(min_chars=33, max_chars=34)
                 address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            # A malformed internal field.
+            with self.assertRaises(
+                ValidationError,
+                msg=f"Error occurred: internal {address.internal} is malformed and should not be allowed.",
+            ):
+                address.internal = self.generate_symbols(16)
+                address.full_clean()
+
+            # A blank internal field should be allowed.
+            # Here, we test that setting it to blank does not raise a ValidationError.
+            try:
+                address.internal = ""
+                address.full_clean()  # This should not raise an error
+            except ValidationError:
+                self.fail("Error occurred: A blank internal field should be allowed.")
+
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_location_field(self):
         """
         Test that the location field is validated.
         """
         for address in self.address_list:
-            try:
-                # A blank location field.
+
+            # A blank location field.
+            with self.assertRaises(
+                ValidationError,
+                msg=f"Error occurred: A blank location should not be allowed, but was.",
+            ):
                 address.location = ""
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+                address.full_clean()
 
-            try:
-                # A malformed location field.
-                address.location = fake.password(length=10)
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+            # A malformed location field.
+            with self.assertRaises(
+                ValidationError,
+                msg=f"Error occurred: location {address.location} is malformed and should not be allowed.",
+            ):
+                address.location = self.generate_symbols(16)
+                address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            # A too long location field.
+            with self.assertRaises(
+                ValidationError,
+                msg=f"Error occurred: location {address.location} is too long and should not be allowed.",
+            ):
+                address.location = fake.pystr(min_chars=33, max_chars=34)
+                address.full_clean()
 
-            try:
-                # A too long location field.
-                address.location = fake.sentence(nb_words=10)
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_stateabbrev_field(self):
         """
         Test that the stateabbrev field is validated.
         """
         for address in self.address_list:
-            try:
-                # A too long stateabbrev.
-                address.stateabbrev = "".join(fake.word() for _ in range(2))
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
 
-            try:
-                # A blank stateabbrev.
+            # A too long stateabbrev.
+            with self.assertRaises(
+                ValidationError,
+                msg=f"Error occurred: stateabbrev {address.stateabbrev} is too long and should not be allowed.",
+            ):
+                address.stateabbrev = fake.pystr_format(string_format="???")
+                address.full_clean()
+
+            # A blank stateabbrev.
+            with self.assertRaises(
+                ValidationError,
+                msg="Error occurred: A blank stateabbrev should not be allowed, but was.",
+            ):
                 address.stateabbrev = ""
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
+                address.full_clean()
 
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            # A malformed stateabbrev.
+            with self.assertRaises(
+                ValidationError,
+                msg=f"Error occured: stateabbrev {address.stateabbrev} is malformed and should not be allowed.",
+            ):
+                address.stateabbrev = self.generate_symbols(2)
+                address.full_clean()
 
-            try:
-                # A malformed stateabbrev.
-                address.stateabbrev = fake.password(length=10)
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_zip_field(self):
         """
         Test that the zip field is validated.
         """
         for address in self.address_list:
-            try:
-                # A malformed zip field.
-                address.zip = fake.word()
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
 
-            try:
-                # A blank zip field.
-                address.zip = ""
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            # A malformed zip field.
+            address.zip = fake.pystr_format(string_format="?????")
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: zip {address.zip} is malformed and should not be allowed.",
+            ):
+                address.full_clean()
 
-            try:
-                # A too long zip field.
-                address.zip = (
-                    fake.zipcode_in_state(state_abbr=address.stateabbrev) + "1"
-                )
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            # A blank zip field.
+            address.zip = ""
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg="A blank zip should not be allowed, but was.",
+            ):
+                address.full_clean()
+
+            # A too long zip field.
+            address.zip = fake.pystr_format(string_format="######")
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: zip {address.zip} is too long and should not be allowed.",
+            ):
+                address.full_clean()
+
+            # A too short zip field.
+            address.zip = fake.pystr_format(string_format="###")
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: zip {address.zip} is too short and should not be allowed.",
+            ):
+                address.full_clean()
+
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_zip4_field_validation(self):
         """
         Test that the zip4 field is validated.
         """
         for address in self.address_list:
-            try:
-                # A malformed zip4 field.
-                address.zip4 = fake.word()
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
 
-            try:
-                # A too long zip4 field.
-                address.zip4 = fake.zipcode_plus4().split("-")[1] + "1"
-                with self.assertRaises(ValidationError):
-                    address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            # A malformed zip4 field.
+            address.zip4 = fake.pystr_format(string_format="????")
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: zip4 {address.zip4} is malformed and should not be allowed.",
+            ):
+                address.full_clean()
+
+            # A too long zip4 field.
+            address.zip4 = fake.pystr_format(string_format="#####")
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: zip4 {address.zip4} is too long and should not be allowed.",
+            ):
+                address.full_clean()
 
             try:
                 # A blank zip4 field.
                 address.zip4 = ""
                 address.full_clean()
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+            except ValidationError:
+                self.fail(
+                    f"Error occurred: A blank zip4 should be allowed, but was not."
+                )
+
+            # A too short zip4 field.
+            address.zip4 = fake.pystr_format(string_format="##")
+            with self.assertRaises(
+                expected_exception=ValidationError,
+                msg=f"Error occurred: zip4 {address.zip4} is too short and should not be allowed.",
+            ):
+                address.full_clean()
+
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
+    # **********************************************************************************************************************
 
     def test_address_deletion(self):
         """
-        Test the deletion of an Address instance.
+        Test the deletion of database Address instances.
         """
+        # Check that the Address instances exist in the database.
+        self.assertEqual(
+            first=self.N_INSTANCES,
+            second=Address.objects.count(),
+            msg=f"Error occurred: Expected {self.N_INSTANCES} instances.",
+        )
 
-        for local_addr, db_addr in zip(
-            sorted(self.address_list, key=lambda x: x.id),
-            Address.objects.all().order_by("id"),
-        ):
-            try:
-                db_addr.delete()
-                # Check that the address has been deleted from the database.
-                self.assertNotIn(local_addr, Address.objects.all())
-            except Exception as e:
-                logger.error(f"Error occurred: {e}", exc_info=True)
-                raise e
+        # Delete the instances from the locally created list from the database.
+        Address.objects.all().delete()
+
+        # Check that the Address instances have been deleted from the database.
+        self.assertEqual(
+            first=Address.objects.count(),
+            second=0,
+            msg="Error occurred: Expected 0 instances.",
+        )
